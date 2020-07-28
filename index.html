@@ -34,6 +34,7 @@
                     </ul>
 
                 </section>
+                <section>Getting the initial state of the user</section>
                 <section>User Manager
 <pre><code data-trim data-noescape data-line-numbers="3,13|4|5|6|7|8|9|10|11|12">
 import { Log, UserManager, WebStorageStateStore } from 'oidc-client';
@@ -211,7 +212,13 @@ RedirectToLogin Usage
 
                 </section>
                 <section>WithAuthentication component
-<pre><code data-trim data-noescape>
+<pre><code data-trim data-noescape data-line-numbers="10|1,12|14-16|18">
+const DefaultErrorComponent = () => &lt;RedirectToLogin />;
+const DefaultRoleErrorComponent = () => (
+    &lt;div data-at="role-access-error">
+        &lt;span>Error: You are not authorised to view this page&lt;/span>
+    &lt;/div>
+);
 const WithAuthenticationComponent = ({
     children, ErrorComponent, roles, userRole, ...props
 }) => {
