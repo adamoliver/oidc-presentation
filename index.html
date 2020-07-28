@@ -1,40 +1,310 @@
 <!doctype html>
 <html>
-	<head>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-		<title>reveal.js</title>
+        <title>reveal.js</title>
 
-		<link rel="stylesheet" href="dist/reset.css">
-		<link rel="stylesheet" href="dist/reveal.css">
-		<link rel="stylesheet" href="dist/theme/black.css" id="theme">
+        <link rel="stylesheet" href="dist/reset.css">
+        <link rel="stylesheet" href="dist/reveal.css">
+        <link rel="stylesheet" href="dist/theme/black.css" id="theme">
 
-		<!-- Theme used for syntax highlighted code -->
-		<link rel="stylesheet" href="plugin/highlight/monokai.css" id="highlight-theme">
-	</head>
-	<body>
-		<div class="reveal">
-			<div class="slides">
-				<section>Slide 1</section>
-				<section>Slide 2</section>
-			</div>
-		</div>
+        <!-- Theme used for syntax highlighted code -->
+        <link rel="stylesheet" href="plugin/highlight/monokai.css" id="highlight-theme">
+    </head>
+    <body>
+        <div class="reveal">
+            <div class="slides">
+                <section>OIDC Client - Getting the initial state of the user</section>
+                <section>User Manager
+<pre><code data-trim data-noescape data-line-numbers="3,13|4|5|6|7|8|9|10|11|12">
+import { Log, UserManager, WebStorageStateStore } from 'oidc-client';
 
-		<script src="dist/reveal.js"></script>
-		<script src="plugin/notes/notes.js"></script>
-		<script src="plugin/markdown/markdown.js"></script>
-		<script src="plugin/highlight/highlight.js"></script>
-		<script>
-			// More info about initialization & config:
-			// - https://revealjs.com/initialization/
-			// - https://revealjs.com/config/
-			Reveal.initialize({
-				hash: true,
+const userManager = new UserManager({
+    authority: `${window.config.OIDC_PROVIDER_URL}/`,
+    automaticSilentRenew: true,
+    client_id: window.config.SSO_CLIENT_ID,
+    post_logout_redirect_uri: window.config.SSO_LOGOUT_CALLBACK_URL,
+    monitorSession: false,
+    redirect_uri: window.config.SSO_LOGIN_CALLBACK_URL,
+    response_type: 'code',
+    scope: 'openid read write',
+    userStore: new WebStorageStateStore({ store: window.localStorage }),
+});
+</code></pre>
+                </section>
+                <section>Application Root
+<pre><code data-trim data-noescape data-line-numbers="1">
+&lt;AuthenticationProvider store={store} userManager={userManager}>
+    // ...
+&lt;/AuthenticationProvider>
+</code></pre>
+                </section>
+                <section>AuthenticationProvider
+<pre><code data-trim data-noescape data-line-numbers="4|12-15">
+class AuthenticationProvider extends React.Component {
+    constructor(props) {
+        super(props);
+        this.userManager = props.userManager;
 
-				// Learn about plugins: https://revealjs.com/plugins/
-				plugins: [ RevealMarkdown, RevealHighlight, RevealNotes ]
-			});
-		</script>
-	</body>
+        this.userManager.events.addUserLoaded(this.onUserLoaded);
+        this.userManager.events.addAccessTokenExpired(this.onAccessTokenExpired);
+        this.userManager.events.addAccessTokenExpiring(this.onAccessTokenExpiring);
+        this.userManager.events.addUserSignedOut(this.onUserSignedOut);
+    }
+
+    async componentDidMount() {
+        this.userManager.clearStaleState();
+        await loadUser(store, this.props.userManager);
+    }
+
+    componentWillUnmount() {
+        this.userManager.events.removeUserLoaded(this.onUserLoaded);
+        this.userManager.events.removeAccessTokenExpired(this.onAccessTokenExpired);
+        this.userManager.events.removeAccessTokenExpiring(this.onAccessTokenExpiring);
+        this.userManager.events.removeUserSignedOut(this.onUserSignedOut);
+    }
+
+    onUserLoaded = (user) => {
+        store.dispatch(userFound({
+            ...user.profile.app_metadata,
+            id: user.profile.app_metadata.user_id,
+        }));
+        setGAProperties(user.profile.app_metadata);
+    };
+
+    onAccessTokenExpired = () => {
+        store.dispatch(userExpired());
+        clearGAProperties();
+    };
+
+    onAccessTokenExpiring = () => {
+        store.dispatch(userExpiring());
+    }
+
+    onUserSignedOut = () => {
+        store.dispatch(userSignedOut());
+        clearGAProperties();
+    }
+
+    render() {
+        return this.props.children;
+    }
+}
+</code></pre>
+                </section>
+                <section>loadUser
+<pre><code data-trim data-noescape data-line-numbers="19-24|21|22|8-12|13-14">
+import {
+    userFound,
+    userExpired,
+    loadingUser,
+} from './redux/actions';
+
+const getUserCallback = (store, user) => {
+    if (user && !user.expired) {
+        store.dispatch(userFound({
+            ...user.profile.app_metadata,
+            id: user.profile.app_metadata.user_id,
+        }));
+    } else if (!user || (user && user.expired)) {
+        store.dispatch(userExpired());
+    }
+    return user;
+};
+
+const loadUser = async (store, userManager) => {
+    store.dispatch(loadingUser());
+    const user = await userManager.getUser();
+    getUserCallback(store, user);
+    return user;
+};
+</code></pre>
+                </section>
+                <section>AuthenticationProvider
+<pre><code data-trim data-noescape data-line-numbers="6-9|24-30|32-35|37-39|41-43|46-48">
+class AuthenticationProvider extends React.Component {
+    constructor(props) {
+        super(props);
+        this.userManager = props.userManager;
+
+        this.userManager.events.addUserLoaded(this.onUserLoaded);
+        this.userManager.events.addAccessTokenExpired(this.onAccessTokenExpired);
+        this.userManager.events.addAccessTokenExpiring(this.onAccessTokenExpiring);
+        this.userManager.events.addUserSignedOut(this.onUserSignedOut);
+    }
+
+    async componentDidMount() {
+        this.userManager.clearStaleState();
+        await loadUser(store, this.props.userManager);
+    }
+
+    componentWillUnmount() {
+        this.userManager.events.removeUserLoaded(this.onUserLoaded);
+        this.userManager.events.removeAccessTokenExpired(this.onAccessTokenExpired);
+        this.userManager.events.removeAccessTokenExpiring(this.onAccessTokenExpiring);
+        this.userManager.events.removeUserSignedOut(this.onUserSignedOut);
+    }
+
+    onUserLoaded = (user) => {
+        store.dispatch(userFound({
+            ...user.profile.app_metadata,
+            id: user.profile.app_metadata.user_id,
+        }));
+        setGAProperties(user.profile.app_metadata);
+    };
+
+    onAccessTokenExpired = () => {
+        store.dispatch(userExpired());
+        clearGAProperties();
+    };
+
+    onAccessTokenExpiring = () => {
+        store.dispatch(userExpiring());
+    }
+
+    onUserSignedOut = () => {
+        store.dispatch(userSignedOut());
+        clearGAProperties();
+    }
+
+    render() {
+        return this.props.children;
+    }
+}
+</code></pre>
+                </section>
+                <section>How to redirect a user to the login page</section>
+                <section>RedirectToLogin component
+<pre><code data-trim data-noescape>
+import userManager from '../userManager';
+
+const RedirectToLogin = ({ nextUrl }) => {
+    userManager.signinRedirect({ state: nextUrl || window.location.href });
+    return null;
+};
+</code></pre>
+</section>
+<section>
+RedirectToLogin Usage
+<pre><code data-trim data-noescape>
+() => &lt;RedirectToLogin />
+</code></pre>
+
+                </section>
+                <section>WithAuthentication component
+<pre><code data-trim data-noescape>
+const WithAuthenticationComponent = ({
+    children, ErrorComponent, roles, userRole, ...props
+}) => {
+    if (!userRole) return &lt;ErrorComponent />;
+
+    const RoleErrorComponent = props.RoleErrorComponent || DefaultRoleErrorComponent;
+
+    if (roles && roles.length && !roles.includes(userRole)) {
+        return &lt;RoleErrorComponent {...props} />;
+    }
+
+    return &lt;UpdatePasswordRequired>{children}&lt;/UpdatePasswordRequired>;
+};
+</code></pre>
+                </section>
+                <section>
+WithAuthentication Usage
+<pre><code data-trim data-noescape>
+() => (
+    &lt;WithAuthentication roles={['TEACHER']}>
+        &lt;MyComponent />
+    &lt;/WithAuthentication>
+);
+</code></pre>
+                </section>
+
+                <section>withAuthentication HOC
+<pre><code data-trim data-noescape>
+const withAuthentication = HOCProps => (
+    WrappedComponent => props => (
+        &lt;WithAuthentication {...HOCProps}>
+            &lt;WrappedComponent {...props} />
+        &lt;/WithAuthentication>
+    )
+);
+</code></pre>
+                </section>
+                <section>
+withAuthentication HOC Usage
+<pre><code data-trim data-noescape>
+withAuthentication({ roles: ['TEACHER'] })(MyComponent);
+</code></pre>
+                </section>
+
+                <section>AuthenticatedLayoutRoute
+                    <pre><code data-trim data-noescape data-line-numbers="13,16,24,26|4-10">
+const AuthenticatedLayoutRoute = ({
+    component: Component, roles, withConstellation, withFooter, withHeader, withStickyHeader, withSwoosh, ...props
+}) => {
+    let LayoutComponent = Layout;
+    if (withSwoosh) {
+        LayoutComponent = LayoutWithSwoosh;
+    }
+    if (withStickyHeader) {
+        LayoutComponent = LayoutWithStickyHeader;
+    }
+
+    return (
+        &lt;Route
+            {...props}
+            render={matchProps => (
+                &lt;WithAuthentication roles={roles} {...props}>
+                    &lt;LayoutComponent
+                        component={Component}
+                        withConstellation={withConstellation}
+                        withFooter={withFooter}
+                        withHeader={withHeader}
+                        {...matchProps}
+                    />
+                &lt;/WithAuthentication>
+            )}
+        />
+    );
+};
+</code></pre>
+</section>
+<section>
+Usage
+<pre><code data-trim data-noescape data-line-numbers="4-10">
+const Dashboard = React.lazy(() => import('./'));
+
+const routes = [
+    &lt;AuthenticatedLayoutRoute
+        component={Dashboard}
+        exact
+        key="dashboard"
+        path="/dashboard"
+        roles={['TEACHER', 'STUDENT']}
+    />,
+];
+</code></pre>
+                </section>
+
+            </div>
+        </div>
+
+        <script src="dist/reveal.js"></script>
+        <script src="plugin/notes/notes.js"></script>
+        <script src="plugin/markdown/markdown.js"></script>
+        <script src="plugin/highlight/highlight.js"></script>
+        <script>
+            // More info about initialization & config:
+            // - https://revealjs.com/initialization/
+            // - https://revealjs.com/config/
+            Reveal.initialize({
+                hash: true,
+
+                // Learn about plugins: https://revealjs.com/plugins/
+                plugins: [ RevealMarkdown, RevealHighlight, RevealNotes ]
+            });
+        </script>
+    </body>
 </html>
